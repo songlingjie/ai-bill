@@ -1,0 +1,14 @@
+package data
+
+import "time"
+
+type Bill struct {
+	ID          int64     `gorm:"primaryKey" json:"id"`
+	UserID      int64     `json:"userId"`
+	Category    string    `json:"category"`
+	Amount      float64   `json:"amount"`
+	Type        string    `json:"type"`
+	Description string    `json:"description"`
+	BillDate    time.Time `json:"billDate"`
+	CreatedAt   time.Time `json:"createdAt"`
+}

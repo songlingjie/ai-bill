@@ -1,0 +1,379 @@
+﻿package handler
+
+import (
+	"ai-demo/data"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+
+	"ai-demo/service"
+)
+
+var allowedCategories = map[string]bool{
+	"餐饮": true,
+	"交通": true,
+	"购物": true,
+	"娱乐": true,
+	"其他": true,
+	"工资": true,
+}
+
+const allCategory = "全部"
+
+type ChatHandler struct {
+	AI *service.OpenAIService
+	DB *gorm.DB
+}
+
+type ChatInput struct {
+	Message string `json:"message" binding:"required"`
+}
+
+type UpdateBillInput struct {
+	Category    string  `json:"category"`
+	Amount      float64 `json:"amount"`
+	Type        string  `json:"type"`
+	Description string  `json:"description"`
+	BillDate    string  `json:"billDate"`
+}
+
+type historyBillQuery struct {
+	StartDate string `form:"startDate"`
+	EndDate   string `form:"endDate"`
+	Category  string `form:"category"`
+}
+
+type aiBill struct {
+	Category string  `json:"category"`
+	Amount   float64 `json:"amount"`
+	Type     string  `json:"type"`
+	Desc     string  `json:"desc"`
+	Date     string  `json:"date"`
+}
+
+type billResponse struct {
+	ID          int64   `json:"id"`
+	Category    string  `json:"category"`
+	Amount      float64 `json:"amount"`
+	Type        string  `json:"type"`
+	Description string  `json:"description"`
+	BillDate    string  `json:"billDate"`
+	BillTime    string  `json:"billTime"`
+}
+
+func NewChatHandler(aiService *service.OpenAIService, db *gorm.DB) *ChatHandler {
+	return &ChatHandler{
+		AI: aiService,
+		DB: db,
+	}
+}
+
+func (h *ChatHandler) Chat(c *gin.Context) {
+	var input ChatInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	result, err := h.AI.Chat(formatInput(input.Message))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	parsedBills, err := parseAIBills(result)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "解析账单失败"})
+		return
+	}
+	if len(parsedBills) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "没有识别到账单"})
+		return
+	}
+
+	bills := make([]data.Bill, 0, len(parsedBills))
+	for _, item := range parsedBills {
+		billDate, err := time.Parse("2006-01-02", item.Date)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "账单日期格式错误"})
+			return
+		}
+
+		category := strings.TrimSpace(item.Category)
+		if !allowedCategories[category] {
+			category = "其他"
+		}
+
+		bills = append(bills, data.Bill{
+			UserID:      1,
+			Category:    category,
+			Amount:      item.Amount,
+			Type:        normalizeType(item.Type),
+			Description: strings.TrimSpace(item.Desc),
+			BillDate:    billDate,
+		})
+	}
+
+	if err := h.DB.Create(&bills).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存账单失败"})
+		return
+	}
+
+	responses := buildBillResponses(bills)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"count": len(responses),
+			"list":  responses,
+		},
+	})
+}
+
+func (h *ChatHandler) TodayBill(c *gin.Context) {
+	var bills []data.Bill
+	now := time.Now()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	end := start.Add(24 * time.Hour)
+
+	h.DB.Where("user_id = ? AND bill_date >= ? AND bill_date < ?", 1, start, end).
+		Order("bill_date desc, id desc").
+		Find(&bills)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    buildBillResponses(bills),
+	})
+}
+
+func (h *ChatHandler) HistoryBills(c *gin.Context) {
+	var query historyBillQuery
+	if err := c.ShouldBindQuery(&query); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "查询参数错误"})
+		return
+	}
+
+	now := time.Now()
+	location := now.Location()
+	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, location)
+	end := start.AddDate(0, 1, 0)
+
+	if query.StartDate != "" {
+		parsedStart, err := time.ParseInLocation("2006-01-02", query.StartDate, location)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "startDate 必须是 YYYY-MM-DD"})
+			return
+		}
+		start = parsedStart
+	}
+
+	if query.EndDate != "" {
+		parsedEnd, err := time.ParseInLocation("2006-01-02", query.EndDate, location)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "endDate 必须是 YYYY-MM-DD"})
+			return
+		}
+		end = parsedEnd.Add(24 * time.Hour)
+	}
+
+	if !start.Before(end) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "开始时间不能晚于结束时间"})
+		return
+	}
+
+	dbQuery := h.DB.Where("user_id = ? AND bill_date >= ? AND bill_date < ?", 1, start, end)
+	if category := strings.TrimSpace(query.Category); category != "" && category != allCategory {
+		dbQuery = dbQuery.Where("category = ?", category)
+	}
+
+	var bills []data.Bill
+	if err := dbQuery.Order("bill_date desc, id desc").Find(&bills).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询账单失败"})
+		return
+	}
+
+	var totalExpense float64
+	var totalIncome float64
+	for _, bill := range bills {
+		if bill.Type == "income" {
+			totalIncome += bill.Amount
+		} else {
+			totalExpense += bill.Amount
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"list":         buildBillResponses(bills),
+			"total":        len(bills),
+			"totalExpense": totalExpense,
+			"totalIncome":  totalIncome,
+		},
+	})
+}
+
+func (h *ChatHandler) UpdateBill(c *gin.Context) {
+	bill, ok := h.findBillByID(c)
+	if !ok {
+		return
+	}
+
+	var input UpdateBillInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数错误"})
+		return
+	}
+
+	if err := applyBillUpdate(&bill, input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.DB.Save(&bill).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新账单失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    buildBillResponse(bill),
+	})
+}
+
+func (h *ChatHandler) DeleteBill(c *gin.Context) {
+	bill, ok := h.findBillByID(c)
+	if !ok {
+		return
+	}
+
+	if err := h.DB.Delete(&bill).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除账单失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func (h *ChatHandler) findBillByID(c *gin.Context) (data.Bill, bool) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "账单 ID 不合法"})
+		return data.Bill{}, false
+	}
+
+	var bill data.Bill
+	if err := h.DB.Where("id = ? AND user_id = ?", id, 1).First(&bill).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "账单不存在"})
+			return data.Bill{}, false
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询账单失败"})
+		return data.Bill{}, false
+	}
+
+	return bill, true
+}
+
+func applyBillUpdate(bill *data.Bill, input UpdateBillInput) error {
+	category := strings.TrimSpace(input.Category)
+	if !allowedCategories[category] {
+		return fmt.Errorf("分类不合法")
+	}
+	if input.Amount <= 0 {
+		return fmt.Errorf("金额必须大于 0")
+	}
+
+	billDate, err := time.Parse("2006-01-02", strings.TrimSpace(input.BillDate))
+	if err != nil {
+		return fmt.Errorf("日期格式必须是 YYYY-MM-DD")
+	}
+
+	bill.Category = category
+	bill.Amount = input.Amount
+	bill.Type = normalizeType(input.Type)
+	bill.Description = strings.TrimSpace(input.Description)
+	bill.BillDate = billDate
+	return nil
+}
+
+func parseAIBills(content string) ([]aiBill, error) {
+	cleaned := strings.TrimSpace(content)
+	cleaned = strings.TrimPrefix(cleaned, "```json")
+	cleaned = strings.TrimPrefix(cleaned, "```")
+	cleaned = strings.TrimSuffix(cleaned, "```")
+	cleaned = strings.TrimSpace(cleaned)
+
+	var bills []aiBill
+	if err := json.Unmarshal([]byte(cleaned), &bills); err == nil {
+		return bills, nil
+	}
+
+	var wrapper struct {
+		Bills []aiBill `json:"bills"`
+	}
+	if err := json.Unmarshal([]byte(cleaned), &wrapper); err == nil && len(wrapper.Bills) > 0 {
+		return wrapper.Bills, nil
+	}
+
+	var single aiBill
+	if err := json.Unmarshal([]byte(cleaned), &single); err == nil && single.Category != "" {
+		return []aiBill{single}, nil
+	}
+
+	return nil, fmt.Errorf("invalid ai bill payload")
+}
+
+func normalizeType(value string) string {
+	if strings.EqualFold(strings.TrimSpace(value), "income") {
+		return "income"
+	}
+	return "expense"
+}
+
+func buildBillResponses(bills []data.Bill) []billResponse {
+	result := make([]billResponse, 0, len(bills))
+	for _, bill := range bills {
+		result = append(result, buildBillResponse(bill))
+	}
+	return result
+}
+
+func buildBillResponse(bill data.Bill) billResponse {
+	return billResponse{
+		ID:          bill.ID,
+		Category:    bill.Category,
+		Amount:      bill.Amount,
+		Type:        bill.Type,
+		Description: bill.Description,
+		BillDate:    bill.BillDate.Format("2006-01-02"),
+		BillTime:    bill.BillDate.Format("15:04"),
+	}
+}
+
+func formatInput(s string) string {
+	return fmt.Sprintf(`请从用户输入中提取一笔或多笔账单，并且只返回 JSON 数组，不要输出解释或 markdown。
+数组中的每一项格式如下：
+[
+  {
+    "category": "餐饮",
+    "amount": 19,
+    "type": "expense",
+    "desc": "吃饭",
+    "date": "2026-04-17"
+  }
+]
+要求：
+1. 一句话里如果包含多笔账单，必须拆成多项返回。
+2. 支出用 expense，收入用 income。
+3. 分类只能是：餐饮、交通、购物、娱乐、其他、工资。
+4. date 必须是 YYYY-MM-DD。
+5. 只返回 JSON 数组。
+用户输入：%s
+`, s)
+}

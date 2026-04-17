@@ -1,0 +1,101 @@
+package service
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+)
+
+type OpenAIService struct {
+	APIKey  string
+	BaseURL string
+	Model   string
+}
+
+type ChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type ChatRequest struct {
+	Model    string        `json:"model"`
+	Messages []ChatMessage `json:"messages"`
+	Stream   bool          `json:"stream"`
+}
+
+type ChatResponse struct {
+	Choices []struct {
+		Message ChatMessage `json:"message"`
+	} `json:"choices"`
+}
+
+func NewOpenAIService(apiKey, baseURL, model string) *OpenAIService {
+	return &OpenAIService{
+		APIKey:  apiKey,
+		BaseURL: baseURL,
+		Model:   model,
+	}
+}
+
+func (s *OpenAIService) Chat(prompt string) (string, error) {
+	reqBody := ChatRequest{
+		Model: s.Model,
+		Messages: []ChatMessage{
+			{
+				Role:    "system",
+				Content: "You are a precise bookkeeping assistant. Return JSON only.",
+			},
+			{
+				Role:    "user",
+				Content: prompt,
+			},
+		},
+		Stream: false,
+	}
+
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequest(
+		http.MethodPost,
+		s.BaseURL+"/chat/completions",
+		bytes.NewBuffer(bodyBytes),
+	)
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+s.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("openai error: %s", string(respBytes))
+	}
+
+	var result ChatResponse
+	if err := json.Unmarshal(respBytes, &result); err != nil {
+		return "", err
+	}
+
+	if len(result.Choices) == 0 {
+		return "", fmt.Errorf("no response")
+	}
+
+	return result.Choices[0].Message.Content, nil
+}
