@@ -29,11 +29,15 @@ func main() {
 
 	authHandler := handler.NewAuthHandler(database, weChatService, cfg.JWTSecret)
 	chatHandler := handler.NewChatHandler(aiService, database)
-
+	log.Println("server started")
 	r := gin.Default()
 	r.Use(cors.Default())
 
 	r.POST("/auth/login", authHandler.Login)
+
+	r.GET("/ping", func(c *gin.Context) {
+		c.JSON(200, gin.H{"msg": "pong"})
+	})
 
 	authGroup := r.Group("/")
 	authGroup.Use(middleware.AuthMiddleware(cfg.JWTSecret))

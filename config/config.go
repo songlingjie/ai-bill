@@ -1,8 +1,8 @@
 package config
 
 import (
+	"log"
 	"os"
-	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -23,29 +23,17 @@ func Load() *Config {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		APIKey:         os.Getenv("OPENAI_API_KEY"),
-		BaseURL:        os.Getenv("OPENAI_BASE_URL"),
-		Model:          os.Getenv("OPENAI_MODEL"),
-		Port:           os.Getenv("PORT"),
-		DBDSN:          os.Getenv("DBDSN"),
-		JWTSecret:      os.Getenv("JWT_SECRET"),
-		WeChatAppID:    os.Getenv("WECHAT_APP_ID"),
-		WeChatSecret:   os.Getenv("WECHAT_APP_SECRET"),
-		WeChatMockMode: strings.EqualFold(os.Getenv("WECHAT_MOCK_MODE"), "true"),
+		APIKey:         "sk-gr-8a67f6189efe32e3046174a1d1a7e4c397da4ce7",
+		BaseURL:        "https://endpoint.greatrouter.com",
+		Model:          "gpt-5.4-mini",
+		Port:           "8080",
+		DBDSN:          os.Getenv("DB_DSN"),
+		JWTSecret:      "8c16e4203f2d674409009hhyb56a5bf",
+		WeChatAppID:    "wx69dffb6e777c0b96",
+		WeChatSecret:   "8c16e4203f2d6744195e33315b56a5bf",
+		WeChatMockMode: false,
 	}
-
-	if cfg.BaseURL == "" {
-		cfg.BaseURL = "https://api.holysheep.ai/v1"
-	}
-	if cfg.Model == "" {
-		cfg.Model = "gpt-4.1-mini"
-	}
-	if cfg.Port == "" {
-		cfg.Port = "8080"
-	}
-	if cfg.JWTSecret == "" {
-		cfg.JWTSecret = "replace-me-with-a-long-random-secret"
-	}
+	log.Printf("config %+v", cfg)
 
 	return cfg
 }

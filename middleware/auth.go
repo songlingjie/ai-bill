@@ -12,11 +12,20 @@ const ContextUserIDKey = "uid"
 
 func AuthMiddleware(secret string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+
+		// ✅ 云托管调试绕过（关键）
+		if c.GetHeader("x-wx-openid") != "" {
+			c.Set(ContextUserIDKey, 1) // 给个默认用户
+			c.Next()
+			return
+		}
+
 		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
 		if authHeader == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "缺少登录凭证"})
 			return
 		}
+
 		if !strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "登录凭证格式错误"})
 			return
