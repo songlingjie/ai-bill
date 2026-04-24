@@ -19,3 +19,4 @@ EXPOSE 8080
 USER appuser
 
 CMD ["/app/server"]
+
