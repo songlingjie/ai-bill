@@ -1,0 +1,10 @@
+.git
+.idea
+*.log
+tmp
+bin
+dist
+node_modules
+.env
+Dockerfile*
+README.md
