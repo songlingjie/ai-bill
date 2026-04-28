@@ -1,11 +1,14 @@
 package service
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 )
 
 type WeChatService struct {
@@ -49,7 +52,12 @@ func (s *WeChatService) Code2Session(code string) (string, error) {
 
 	fmt.Printf("微信登录请求: %s\n", endpoint)
 
-	resp, err := http.Get(endpoint)
+	client, err := createHTTPClient()
+	if err != nil {
+		return "", fmt.Errorf("创建 HTTP 客户端失败: %v", err)
+	}
+
+	resp, err := client.Get(endpoint)
 	if err != nil {
 		return "", fmt.Errorf("微信接口请求失败: %v", err)
 	}
@@ -73,4 +81,42 @@ func (s *WeChatService) Code2Session(code string) (string, error) {
 		return "", fmt.Errorf("微信登录失败: 未获取到 openid")
 	}
 	return result.OpenID, nil
+}
+
+func createHTTPClient() (*http.Client, error) {
+	rootCAs, err := x509.SystemCertPool()
+	if err != nil {
+		fmt.Printf("无法获取系统证书池: %v，尝试创建新的证书池\n", err)
+		rootCAs = x509.NewCertPool()
+	}
+
+	// 尝试加载系统证书文件
+	certFiles := []string{
+		"/etc/ssl/certs/ca-certificates.crt",
+		"/etc/pki/tls/certs/ca-bundle.crt",
+		"/etc/ssl/ca-bundle.pem",
+		"/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+	}
+
+	for _, certFile := range certFiles {
+		if _, err := os.Stat(certFile); err == nil {
+			certData, err := os.ReadFile(certFile)
+			if err == nil {
+				if rootCAs.AppendCertsFromPEM(certData) {
+					fmt.Printf("成功加载证书文件: %s\n", certFile)
+				}
+			}
+		}
+	}
+
+	tlsConfig := &tls.Config{
+		RootCAs:            rootCAs,
+		InsecureSkipVerify: false,
+	}
+
+	transport := &http.Transport{
+		TLSClientConfig: tlsConfig,
+	}
+
+	return &http.Client{Transport: transport}, nil
 }
