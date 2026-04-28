@@ -14,9 +14,9 @@ WORKDIR /app
 RUN adduser -D -H appuser
 
 COPY --from=builder /app/server /app/server
+COPY .env /app/.env
 
 EXPOSE 8080
 USER appuser
 
 CMD ["/app/server"]
-

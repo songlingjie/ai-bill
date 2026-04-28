@@ -1,0 +1,11 @@
+component: koala
+name: ai-demo
+
+koa:
+  component: '@wechat/cloudbase-framework-plugin-koa'
+  inputs:
+    name: ai-demo
+    runtime: go1
+    dockerfile: Dockerfile
+    envVariables:
+      PORT: 8080
