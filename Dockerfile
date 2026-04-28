@@ -12,6 +12,7 @@ FROM alpine:3.21
 
 WORKDIR /app
 RUN adduser -D -H appuser
+RUN apk add --no-cache ca-certificates
 
 COPY --from=builder /app/server /app/server
 COPY .env /app/.env

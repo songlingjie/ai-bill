@@ -47,23 +47,27 @@ func (s *WeChatService) Code2Session(code string) (string, error) {
 		"&js_code=" + url.QueryEscape(code) +
 		"&grant_type=authorization_code"
 
+	fmt.Printf("微信登录请求: %s\n", endpoint)
+
 	resp, err := http.Get(endpoint)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("微信接口请求失败: %v", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("读取微信响应失败: %v", err)
 	}
+
+	fmt.Printf("微信登录响应: %s\n", string(respBody))
 
 	var result code2SessionResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", err
+		return "", fmt.Errorf("解析微信响应失败: %v, 响应内容: %s", err, string(respBody))
 	}
 	if result.ErrCode != 0 {
-		return "", fmt.Errorf("微信登录失败: %s", result.ErrMsg)
+		return "", fmt.Errorf("微信登录失败: %s, errCode: %d", result.ErrMsg, result.ErrCode)
 	}
 	if result.OpenID == "" {
 		return "", fmt.Errorf("微信登录失败: 未获取到 openid")

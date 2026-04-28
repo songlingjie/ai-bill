@@ -23,14 +23,16 @@ func Load() *Config {
 	_ = godotenv.Load()
 
 	cfg := &Config{
-		APIKey:         "sk-gr-8a67f6189efe32e3046174a1d1a7e4c397da4ce7",
-		BaseURL:        "https://endpoint.greatrouter.com",
-		Model:          "gpt-5.4-mini",
-		Port:           "8080",
-		DBDSN:          os.Getenv("DB_DSN"),
-		JWTSecret:      "8c16e4203f2d674409009hhyb56a5bf",
-		WeChatAppID:    "wx69dffb6e777c0b96",
-		WeChatSecret:   "8c16e4203f2d6744195e33315b56a5bf",
+		APIKey:    "sk-gr-8a67f6189efe32e3046174a1d1a7e4c397da4ce7",
+		BaseURL:   "https://endpoint.greatrouter.com",
+		Model:     "gpt-5.4-mini",
+		Port:      "8080",
+		DBDSN:     os.Getenv("DB_DSN"),
+		JWTSecret: "8c16e4203f2d674409009hhyb56a5bf",
+		//WeChatAppID:    "wx69dffb6e777c0b96",
+		//WeChatSecret:   "8c16e4203f2d6744195e33315b56a5bf",
+		WeChatAppID:    "wx531bd1284a42c863",
+		WeChatSecret:   "0828a8e46af6defb32e94227eadf6f37",
 		WeChatMockMode: false,
 	}
 	log.Printf("config %+v", cfg)
